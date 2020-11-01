@@ -1,4 +1,5 @@
 import feedparser
+from urllib.request import urlopen, Request
 from itertools import takewhile
 import sys
 import codecs
@@ -41,6 +42,8 @@ def parseCortex(verbose=False):
 			print(f"{item['title']}")
 
 	return feed
+
+
 
 def parseCombined(verbose=False):
 	def prefix_title(prefix, item):
@@ -96,6 +99,7 @@ def parseCombined(verbose=False):
 
 
 def unparse(feed):
+	from html import escape
 	from queue import LifoQueue
 	tails = LifoQueue()
 
@@ -127,7 +131,7 @@ def unparse(feed):
 		if cdata:
 			result += f"<![CDATA[{feed['feed'][parsedname]}]]>"
 		else:
-			result += feed['feed'][parsedname]
+			result += escape(feed['feed'][parsedname])
 		end_tag()
 
 	def add_simple_entry(name, parsedname=None, cdata=False, extra="", silentfail=False):
@@ -138,12 +142,12 @@ def unparse(feed):
 			parsedname = name
 		if parsedname not in entry.keys():
 			return 
-			
+
 		start_tag(name, extra)
 		if cdata:
 			result += f"<![CDATA[{entry[parsedname]}]]>"
 		else:
-			result += entry[parsedname]
+			result += escape(entry[parsedname])
 		end_tag()
 
 	result = '''<?xml version="1.0" encoding="UTF-8"?>
@@ -164,21 +168,20 @@ def unparse(feed):
 	add_simple('itunes:subtitle', 'subtitle')
 
 	start_tag('itunes:explicit')
-	val = 'yes' if feed['feed']['itunes_explicit'] else 'no'
-	result += val
+	result += 'yes' if feed['feed']['itunes_explicit'] else 'no'
 	end_tag()
 
 	start_tag("itunes:owner")
 	add_simple("itunes:name", 'author')
 	start_tag('itunes:email')
-	result += feed['feed']['author_detail']['email']
+	result += escape(feed['feed']['author_detail']['email'])
 	end_tag()
 	end_tag()
 	result += '<itunes:category text="Education"/>'
 	result += '<itunes:type>episodic</itunes:type>'
 
-	val = feed['feed']['image']['href']
-	result += f'<itunes:image href="{val}">'
+	val = escape(feed['feed']['image']['href'])
+	result += f'<itunes:image href="{val}"/>'
 
 
 	add_simple('description', cdata=True)
@@ -206,13 +209,12 @@ def unparse(feed):
 		add_simple_entry('itunes:author', 'author')
 
 		start_tag('itunes:explicit')
-		val = strbool(entry['itunes_explicit'])
-		result += val
+		result += strbool(entry['itunes_explicit'])
 		end_tag()
 
 		add_simple_entry('itunes:duration', 'itunes_duration', silentfail=True)
 		add_simple_entry('itunes:author', 'author')
-		result += f'<itunes:image href="{entry["image"]["href"]}"/>'
+		result += f'<itunes:image href="{escape(entry["image"]["href"])}"/>'
 
 		add_simple_entry('itunes:episode', 'itunes_episode', silentfail=True)
 		add_simple_entry('itunes:title', 'itunes_title', silentfail=True)
@@ -220,10 +222,10 @@ def unparse(feed):
 		result += '<itunes:episodeType>full</itunes:episodeType>'
 
 		#TODO find the one that's actually 'type': 'audio/mp3'
-		mp3_url = entry['links'][0]['href']
+		mp3_url = escape(entry['links'][0]['href'])
 		result += f'<enclosure url="{mp3_url}" type="audio/mpeg"/>'
-		result += f'<media:content url="{mp3_url}" type=audio/mpeg isDefault="true" medium="audio">'
-		result += f'<media:title type="plain">{entry["title"]}</media:title>'
+		result += f'<media:content url="{mp3_url}" type="audio/mpeg" isDefault="true" medium="audio">'
+		result += f'<media:title type="plain">{escape(entry["title"])}</media:title>'
 		result += '</media:content>'
 		result += f'<enclosure url="{mp3_url}" type="audio/mpeg"/>'
 
@@ -232,42 +234,54 @@ def unparse(feed):
 	end_all_tags()
 	return result
 
+def levenshteinDistance(s1, s2):
+    if len(s1) > len(s2):
+        s1, s2 = s2, s1
+
+    distances = range(len(s1) + 1)
+    for i2, c2 in enumerate(s2):
+        distances_ = [i2+1]
+        for i1, c1 in enumerate(s1):
+            if c1 == c2:
+                distances_.append(distances[i1])
+            else:
+                distances_.append(1 + min((distances[i1], distances[i1 + 1], distances_[-1])))
+        distances = distances_
+    return distances[-1]
+
+
+def testunparse():
+	url = "https://www.relay.fm/cortex/feed"
+	request = Request(url)
+	request.add_header('User-Agent', 'Mozilla/5.0')
+	raw_xml = urlopen(request).read().decode('utf-8')
+	with open("cortex_raw.xml", 'w', encoding='utf-8') as outf:
+		outf.write(raw_xml)
+
+		
+	feed = feedparser.parse(url)
+	unparsed = unparse(feed)
+	with open("cortex_unparsed.xml", 'w', encoding='utf-8') as outf:
+		outf.write(unparsed)
 
 
 
-# def unparse(feed):
-# 	from feedgen.feed import FeedGenerator
-
-# 	fg = FeedGenerator()
-# 	fg.load_extension('podcast')
-
-# 	# fg.id('http://lernfunk.de/media/654321')
-# 	fg.title(feed['feed']['title'])
-# 	fg.author(feed['feed']['authors'][0])
-# 	fg.link(feed['feed']['links'][0])
-# 	fg.logo(feed['feed']['image'])
-# 	fg.subtitle(feed['feed']['subtitle'])
-# 	fg.language(feed['feed']['language'])
-# 	fg.updated(feed['feed']['updated'])
 
 
+def createHelloCortex():
+	print("Parsing feeds... ", end='')
+	feed = parseCombined()
+	print("Done.")
 
-# 	for entry in feed['entries']:
+	print("Constructing XML... ", end='')
+	result = unparse(feed)
+	print("Done.")
 
-# 		fe = fg.add_entry()
-# 		fe.title(entry['title'])
-# 		# fe.title_detail(entry['title_detail'])
-# 		fe.author(entry['authors'][0])
-# 		fe.updated(entry['published'])
-# 		fe.link(entry['links'][0])
-# 		fe.id(entry['id'])
 
-# 	fg.rss_file('hellocortex.xml')
+	if result:
+		with open("hello_cortex.xml", 'w', encoding="utf-8") as outf:
+			outf.write(result)
 
-feed = parseCombined()
-# feed = parseCortex()
-# parseHelloInternet(1)
-result = unparse(feed)
-if result:
-	with open("hello_cortex.xml", 'w', encoding="utf-8") as outf:
-		outf.write(result)
+
+
+createHelloCortex()
